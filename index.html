@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+    <title>ChatApp_Socket</title>
+    <link
+      href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-ggOyR0iXCbMQv3Xipma34MD+dH/1fQ784/j6cY/iJTQUOhcWr7x9JvoRxT2MZw1T"
+      crossorigin="anonymous"
+    />
+  </head>
+
+  <body>
+    <div id="app">
+      <div class="container">
+        <div class="col-lg-6 offset-lg-3">
+          <div v-if="ready">
+            <p v-for="user in info">{{user.username}} {{user.type}}</p>
+          </div>
+
+          <div v-if="!ready">
+            <h4>Enter your username</h4>
+            <form @submit.prevent="addUser">
+              <div class="form-group row">
+                <input
+                  type="text"
+                  class="form-control col-9"
+                  v-model="username"
+                  placeholder="Enter username here"
+                />
+                <input
+                  type="submit"
+                  value="Join"
+                  class="btn btn-sm btn-info ml-1"
+                />
+              </div>
+            </form>
+          </div>
+          <h2 v-else>{{username}}</h2>
+          <div class="card bg-info" v-if="ready">
+            <div class="card-header text-white">
+              <h4>
+                My Chat App
+                <span class="float-right">{{connections}} connections</span>
+              </h4>
+            </div>
+            <ul class="list-group list-group-flush text-right">
+              <small v-if="typing" class="text-white"
+                >{{typing}} is typing</small
+              >
+              <li class="list-group-item" v-for="message in messages">
+                <span :class="{'float-left':message.type === 1}">
+                  {{message.message}}
+                  <small>:{{message.user}}</small>
+                </span>
+              </li>
+            </ul>
+
+            <div class="card-body">
+              <form @submit.prevent="send">
+                <div class="form-group">
+                  <input
+                    type="text"
+                    class="form-control"
+                    v-model="newMessage"
+                    placeholder="Enter message here"
+                  />
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.6.10/vue.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    /*
+    1__Socket.ON(): принимает в качестве параметров название события и обратный вызов. Прослушивает события, отправленные на сервер и с него. 
+    Обратный вызов нужен для получения данных, связанных с событием.
+
+    2__Socket.EMIT(): отправляет/посылает событие с данными или без них для прослушивания сокетов (включая себя).
+
+    3__Socket.Broadcast.Emit(): отправляет событие всем подключенным клиентам (кроме себя). 
+    Эти методы пригодятся для отправки событий с сервера через чат-приложение.
+    */
+
+    // Клиентская часть объекта Socket.IO
+    var socket = io();
+
+    // Создание нового экземпляра Vue
+    let vue = new Vue({
+      // Добавление корневого элемента в приложение Vue
+      el: "#app",
+
+      // Объявление объекта данных через пустые массивы и свойства
+      data: {
+        newMessage: null,
+        messages: [],
+        typing: false,
+        username: null,
+        ready: false,
+        info: [],
+        connections: 0,
+      },
+
+      // Создан метод Vue CREATED
+      created() {
+        // Отправление события 'leave' (покидает чат) во вкладку закрытых событий.
+        window.onbeforeunload = () => {
+          socket.emit("leave", this.username);
+        };
+
+        // Прослушивание события chat-message, отправленного с сервера и добавленного в массив message
+        socket.on("chat-message", (data) => {
+          this.messages.push({
+            message: data.message,
+            type: 1,
+            user: data.user,
+          });
+        });
+
+        // Прослушивание события typing, отправленного с сервера и показывающего данные (имя пользователя) в UI
+        socket.on("typing", (data) => {
+          this.typing = data;
+        });
+
+        // Прослушивание события stopTyping, отправленного с сервера и меняющего свойства typing на false
+        socket.on("stopTyping", () => {
+          this.typing = false;
+        });
+
+        // Прослушивание события joined, отправленного с сервера и добавляющего данные в массив info
+        socket.on("joined", (data) => {
+          this.info.push({
+            username: data,
+            type: "joined",
+          });
+
+          // Установка времени ожидания до обнуления массива info
+          setTimeout(() => {
+            this.info = [];
+          }, 5000);
+        });
+
+        // Прослушивание события leave, отправляемого с сервера и добавляющего данные в массив info
+        socket.on("leave", (data) => {
+          this.info.push({
+            username: data,
+            type: "left",
+          });
+
+          // Установка времени ожидания до обнуления массива info
+          setTimeout(() => {
+            this.info = [];
+          }, 5000);
+        });
+
+        // Прослушивание события connections, отправляемого с сервера. Показывает общее количество подключенных клиентов
+        socket.on("connections", (data) => {
+          this.connections = data;
+        });
+      },
+
+      // Vue-хук Watch
+      watch: {
+        // Просматривает изменения во входящих сообщениях и отправляет событие typing или stopTyping
+        newMessage(value) {
+          value
+            ? socket.emit("typing", this.username)
+            : socket.emit("stopTyping");
+        },
+      },
+
+      //Vue-хук Methods
+      methods: {
+        //Метод send сохраняет сообщение пользователя и отправляет событие на сервер.
+        send() {
+          this.messages.push({
+            message: this.newMessage,
+            type: 0,
+            user: "Me",
+          });
+
+          socket.emit("chat-message", {
+            message: this.newMessage,
+            user: this.username,
+          });
+          this.newMessage = null;
+        },
+
+        // Метод addUser отправляет событие joined с именем пользователя и устанавливает значение свойства ready как true.
+        addUser() {
+          this.ready = true;
+          socket.emit("joined", this.username);
+        },
+      },
+    });
+  </script>
+</html>
